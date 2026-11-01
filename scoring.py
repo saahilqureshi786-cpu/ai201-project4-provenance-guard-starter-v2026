@@ -1,9 +1,6 @@
 """
 Combine the model and style signals and turn the final score into
 a reader-facing result.
-
-Milestone 4 builds combine_signals.
-Milestone 5 completes score_to_label.
 """
 
 import config
@@ -16,17 +13,13 @@ def clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
 
 def combine_signals(model_score: float, style_score: float) -> float:
     """
-    Combine the model signal and style signal into one confidence score.
+    Combine the model signal and style signal.
 
-    Both inputs use the same direction:
+    Both use the same direction:
         0.0 = more human-like
         1.0 = more AI-like
 
-    The initial rule gives both signals equal weight.
-
-    If the signals disagree strongly, the average naturally moves toward
-    the middle, representing uncertainty rather than allowing one signal
-    to make a high-confidence accusation by itself.
+    Both currently receive equal weight.
     """
 
     combined = (
@@ -39,27 +32,31 @@ def combine_signals(model_score: float, style_score: float) -> float:
 
 def score_to_label(score: float) -> tuple[str, str]:
     """
-    Turn the combined score into a machine-readable guess and a
-    reader-facing label.
-
-    Milestone 5 will finalize the exact wording.
+    Convert a combined score into:
+    1. a machine-readable guess
+    2. a full reader-facing label
     """
+
+    score = clamp(score)
 
     if score >= config.AI_THRESHOLD:
         return (
             "ai",
-            "PLACEHOLDER — high-confidence AI label will be added in Milestone 5.",
+            "Our signals strongly suggest this writing may be AI-generated. "
+            "This result is not proof of authorship, and the writer can appeal "
+            "the decision.",
         )
 
     if score <= config.HUMAN_THRESHOLD:
         return (
             "human",
-            "PLACEHOLDER — high-confidence human label will be added in Milestone 5.",
+            "Our signals strongly suggest this writing was written by a person.",
         )
 
     return (
         "unsure",
-        "PLACEHOLDER — unsure label will be added in Milestone 5.",
+        "Our signals do not give a clear result, so we are not making an "
+        "authorship claim about this writing.",
     )
 
 
@@ -73,7 +70,8 @@ def label_ranges() -> list[tuple[str, str]]:
         ),
         (
             "unsure",
-            f"{config.HUMAN_THRESHOLD:.2f} – {config.AI_THRESHOLD:.2f}",
+            f"above {config.HUMAN_THRESHOLD:.2f} and below "
+            f"{config.AI_THRESHOLD:.2f}",
         ),
         (
             "high-confidence AI",
@@ -96,14 +94,17 @@ if __name__ == "__main__":
 
     for model_score, style_score in examples:
         combined = combine_signals(model_score, style_score)
+        guess, label = score_to_label(combined)
 
         print(
             f"model={model_score:.2f} "
             f"style={style_score:.2f} "
-            f"combined={combined:.2f}"
+            f"combined={combined:.2f} "
+            f"guess={guess}"
         )
+        print(f"label={label}")
+        print()
 
-    print()
     print("Label ranges")
 
     for label, score_range in label_ranges():

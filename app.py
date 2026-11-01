@@ -2,10 +2,13 @@
 """
 Provenance Guard — the web service.
 
-Unit 7:
-- POST /submit accepts writing and scores it with two different signals.
-- POST /appeal is completed in Milestone 5.
-- GET /log and GET /health expose service information.
+Unit 7 complete required backend:
+- POST /submit
+- two signals
+- combined confidence
+- three reader-facing labels
+- POST /appeal
+- audit logging
 """
 
 import uuid
@@ -101,7 +104,7 @@ def health():
     })
 
 
-# ── Milestone 4: two signals and combined score ───────────────────────────
+# ── Submission route ──────────────────────────────────────────────────────
 
 @app.post("/submit")
 # @limiter.limit(
@@ -110,17 +113,8 @@ def health():
 # )
 def submit():
     """
-    Accept text and creator_id.
-
-    The route:
-    1. validates the request
-    2. runs the GPT-2 model signal
-    3. runs the stylometry signal
-    4. combines both scores
-    5. logs all scores
-    6. returns structured JSON
-
-    Milestone 5 adds the final reader-facing label.
+    Accept text and creator_id, run both signals, combine them,
+    map the score to a label, log the result, and return JSON.
     """
 
     import detector
@@ -129,7 +123,7 @@ def submit():
 
     payload = request.get_json(silent=True)
 
-    # JSON must be an object.
+    # Request body must be a JSON object.
     if not isinstance(payload, dict):
         audit.log_rejection(
             creator_id="unknown",
@@ -175,7 +169,7 @@ def submit():
     text = text.strip()
     creator_id = creator_id.strip()
 
-    # Reject unusually large submissions.
+    # Reject extremely large submissions.
     if len(text) > 20000:
         audit.log_rejection(
             creator_id=creator_id,
@@ -190,7 +184,7 @@ def submit():
 
     content_id = str(uuid.uuid4())
 
-    # ── Signal one: model predictability ──────────────────────────────
+    # ── Signal one ────────────────────────────────────────────────────
 
     try:
         model_score = detector.model_signal(text)
@@ -212,23 +206,22 @@ def submit():
             "message": str(exc),
         }), 503
 
-    # ── Signal two: writing style ─────────────────────────────────────
+    # ── Signal two ────────────────────────────────────────────────────
 
     style_score = stylometry.style_signal(text)
 
-    # ── Combine both signals ──────────────────────────────────────────
+    # ── Combined confidence ───────────────────────────────────────────
 
     combined_score = scoring.combine_signals(
         model_score,
         style_score,
     )
 
-    # The final guess and label are deliberately completed in Milestone 5.
-    guess = "pending"
-    label = "Final reader-facing label will be added in Milestone 5."
-
-    # For this project, the combined 0–1 score is returned as confidence.
     confidence = combined_score
+
+    # ── Reader-facing result ──────────────────────────────────────────
+
+    guess, label = scoring.score_to_label(combined_score)
 
     # ── Audit log ─────────────────────────────────────────────────────
 
@@ -243,8 +236,6 @@ def submit():
         status="decided",
     )
 
-    # ── Response ──────────────────────────────────────────────────────
-
     return jsonify({
         "content_id": content_id,
         "guess": guess,
@@ -255,21 +246,87 @@ def submit():
     })
 
 
-# ── Milestone 5: appeal ───────────────────────────────────────────────────
+# ── Appeal route ──────────────────────────────────────────────────────────
 
 @app.post("/appeal")
 def appeal():
     """
-    Appeal remains intentionally unfinished until Milestone 5.
+    Allow a writer to challenge a decision.
+
+    Input:
+        content_id
+        reasoning
+
+    A valid appeal:
+    - confirms the content exists
+    - records the appeal
+    - changes the current status to under_review
     """
 
-    payload = request.get_json(silent=True) or {}
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify({
+            "error": "invalid_json",
+            "message": "Request body must be a JSON object.",
+        }), 400
+
+    content_id = payload.get("content_id")
+    reasoning = payload.get("reasoning")
+
+    if not isinstance(content_id, str) or not content_id.strip():
+        return jsonify({
+            "error": "invalid_content_id",
+            "message": "content_id must be a non-empty string.",
+        }), 400
+
+    if not isinstance(reasoning, str) or not reasoning.strip():
+        return jsonify({
+            "error": "invalid_reasoning",
+            "message": "reasoning must be a non-empty string.",
+        }), 400
+
+    content_id = content_id.strip()
+    reasoning = reasoning.strip()
+
+    entries = audit.entries_for(content_id)
+
+    if not entries:
+        return jsonify({
+            "error": "content_not_found",
+            "message": "No submitted content exists with that content_id.",
+        }), 404
+
+    # Find the original decision so we know which creator owns the item.
+    original_decision = next(
+        (
+            entry
+            for entry in entries
+            if entry.get("guess") is not None
+        ),
+        None,
+    )
+
+    if original_decision is None:
+        return jsonify({
+            "error": "decision_not_found",
+            "message": "The content exists but no original decision was found.",
+        }), 404
+
+    creator_id = original_decision.get("creator_id", "unknown")
+
+    appeal_entry = audit.log_appeal(
+        content_id=content_id,
+        creator_id=creator_id,
+        reasoning=reasoning,
+    )
 
     return jsonify({
-        "error": "not_implemented",
-        "message": "POST /appeal is built in Milestone 5.",
-        "you_sent": payload,
-    }), 501
+        "content_id": content_id,
+        "status": "under_review",
+        "message": "Your appeal was recorded and the item is now under review.",
+        "appeal": appeal_entry,
+    })
 
 
 # ── Audit log ─────────────────────────────────────────────────────────────
