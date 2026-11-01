@@ -42,65 +42,48 @@ Two things worth knowing before you pick numbers:
   a **miss**.
 
 ---
-## 1.
+## 1. False positives
 
-<!-- Your criterion. It must name a number. -->
+Of 10 pieces of writing that I judge to be clearly human-written, no more than 1 should receive the high-confidence AI label.
 
-
-
-**Why this target:**
-
-
+**Why this target:**  
+I chose this target because falsely accusing a real writer is more harmful than letting some AI-written text pass through. I want the system to be cautious before giving the strongest AI label.
 
 ---
 
-## 2.
+## 2. Score spread
 
-<!-- Your criterion. -->
+The combined score for clearly AI-written text and clearly human-written text should differ by at least 0.40.
 
-
-
-**Why this target:**
-
-
+**Why this target:**  
+I chose a 0.40 difference because clearly different examples should not end up with almost the same confidence score. A noticeable gap shows that the signals are actually separating obvious cases.
 
 ---
 
-## 3.
+## 3. Label coverage
 
-<!-- Your criterion. -->
+I should be able to deliberately create test inputs that reach all 3 of the 3 possible labels: high-confidence human, unsure, and high-confidence AI.
 
-
-
-**Why this target:**
-
-
+**Why this target:**  
+All three labels need to be reachable because each represents a different level of certainty. If one label can never appear, then part of the system is not actually useful.
 
 ---
 
-## 4.
+## 4. Appeal path
 
-<!-- Your criterion. -->
+For 5 out of 5 valid appeals, the content status should change to `under_review` and the appeal should also appear in the audit log.
 
-
-
-**Why this target:**
-
-
+**Why this target:**  
+I chose 5 out of 5 because the appeal process is the writer's way to challenge a decision. A valid appeal should always be recorded and should never disappear without changing the item's status.
 
 ---
 
-## 5.
+## 5. Bad input
 
-<!-- Your criterion. -->
+At least 4 out of 5 malformed submission requests should return a controlled error response instead of crashing the service.
 
-
-
-**Why this target:**
-
-
-
----
+**Why this target:**  
+I chose 4 out of 5 because the service should handle most common input mistakes safely. I am leaving room for one unusual edge case that may reveal something I need to improve during testing.
 
 <!-- ─────────────────────────────────────────────────────────────────────────
      UNIT 8 — read this before you change anything above.
