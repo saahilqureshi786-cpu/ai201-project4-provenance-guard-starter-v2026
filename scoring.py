@@ -1,5 +1,5 @@
 """
-Combine the model and style signals and turn the final score into
+Combine three signals and turn the final score into
 a reader-facing result.
 """
 
@@ -11,31 +11,38 @@ def clamp(value: float, low: float = 0.0, high: float = 1.0) -> float:
     return max(low, min(high, value))
 
 
-def combine_signals(model_score: float, style_score: float) -> float:
+def combine_signals(
+    model_score: float,
+    style_score: float,
+    repetition_score: float,
+) -> float:
     """
-    Combine the model signal and style signal.
+    Combine three different signals into one 0–1 score.
 
-    Both use the same direction:
+    All three point in the same direction:
         0.0 = more human-like
         1.0 = more AI-like
 
-    Both currently receive equal weight.
+    Weights:
+        model predictability: 45%
+        stylometry:          35%
+        phrase repetition:   20%
+
+    The repetition signal gets the smallest weight because repetition is useful
+    but easy to change deliberately.
     """
 
     combined = (
         config.WEIGHT_MODEL_SIGNAL * model_score
         + config.WEIGHT_STYLE_SIGNAL * style_score
+        + config.WEIGHT_REPETITION_SIGNAL * repetition_score
     )
 
     return round(clamp(combined), 4)
 
 
 def score_to_label(score: float) -> tuple[str, str]:
-    """
-    Convert a combined score into:
-    1. a machine-readable guess
-    2. a full reader-facing label
-    """
+    """Convert the score into a machine guess and reader-facing label."""
 
     score = clamp(score)
 
@@ -82,26 +89,34 @@ def label_ranges() -> list[tuple[str, str]]:
 
 if __name__ == "__main__":
     print("Signal weights")
-    print(f"model: {config.WEIGHT_MODEL_SIGNAL}")
-    print(f"style: {config.WEIGHT_STYLE_SIGNAL}")
+    print(f"model:      {config.WEIGHT_MODEL_SIGNAL}")
+    print(f"style:      {config.WEIGHT_STYLE_SIGNAL}")
+    print(f"repetition: {config.WEIGHT_REPETITION_SIGNAL}")
     print()
 
     examples = [
-        (0.90, 0.80),
-        (0.90, 0.10),
-        (0.20, 0.30),
+        (0.90, 0.80, 0.90),
+        (0.90, 0.10, 0.00),
+        (0.20, 0.30, 0.00),
     ]
 
-    for model_score, style_score in examples:
-        combined = combine_signals(model_score, style_score)
+    for model_score, style_score, repetition_score in examples:
+        combined = combine_signals(
+            model_score,
+            style_score,
+            repetition_score,
+        )
+
         guess, label = score_to_label(combined)
 
         print(
             f"model={model_score:.2f} "
             f"style={style_score:.2f} "
+            f"repetition={repetition_score:.2f} "
             f"combined={combined:.2f} "
             f"guess={guess}"
         )
+
         print(f"label={label}")
         print()
 
