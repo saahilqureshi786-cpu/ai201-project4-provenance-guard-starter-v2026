@@ -3,9 +3,9 @@
 Provenance Guard — the web service.
 
 Unit 7:
-- POST /submit is built in stages.
-- POST /appeal comes in Milestone 5.
-- GET /log and GET /health are provided by the starter.
+- POST /submit accepts writing and scores it with two different signals.
+- POST /appeal is completed in Milestone 5.
+- GET /log and GET /health expose service information.
 """
 
 import uuid
@@ -101,7 +101,7 @@ def health():
     })
 
 
-# ── Milestone 3: submission with one real signal ──────────────────────────
+# ── Milestone 4: two signals and combined score ───────────────────────────
 
 @app.post("/submit")
 # @limiter.limit(
@@ -110,14 +110,22 @@ def health():
 # )
 def submit():
     """
-    Accept text and creator_id, run the model signal, log the decision,
-    and return a structured response.
+    Accept text and creator_id.
 
-    Milestone 3 intentionally uses only the model signal.
-    The stylometry signal and combined confidence are added in Milestone 4.
+    The route:
+    1. validates the request
+    2. runs the GPT-2 model signal
+    3. runs the stylometry signal
+    4. combines both scores
+    5. logs all scores
+    6. returns structured JSON
+
+    Milestone 5 adds the final reader-facing label.
     """
 
     import detector
+    import scoring
+    import stylometry
 
     payload = request.get_json(silent=True)
 
@@ -139,7 +147,11 @@ def submit():
     # Validate text.
     if not isinstance(text, str) or not text.strip():
         audit.log_rejection(
-            creator_id=creator_id if isinstance(creator_id, str) else "unknown",
+            creator_id=(
+                creator_id
+                if isinstance(creator_id, str)
+                else "unknown"
+            ),
             reason="missing_or_empty_text",
         )
 
@@ -163,7 +175,7 @@ def submit():
     text = text.strip()
     creator_id = creator_id.strip()
 
-    # Put a reasonable boundary on enormous requests.
+    # Reject unusually large submissions.
     if len(text) > 20000:
         audit.log_rejection(
             creator_id=creator_id,
@@ -176,8 +188,9 @@ def submit():
             "message": "text must contain 20,000 characters or fewer.",
         }), 413
 
-    # Create the ID that will later be used by /appeal.
     content_id = str(uuid.uuid4())
+
+    # ── Signal one: model predictability ──────────────────────────────
 
     try:
         model_score = detector.model_signal(text)
@@ -199,22 +212,38 @@ def submit():
             "message": str(exc),
         }), 503
 
-    # Milestone 3 placeholders.
-    # Milestone 4 will replace these with the second signal and combined score.
+    # ── Signal two: writing style ─────────────────────────────────────
+
+    style_score = stylometry.style_signal(text)
+
+    # ── Combine both signals ──────────────────────────────────────────
+
+    combined_score = scoring.combine_signals(
+        model_score,
+        style_score,
+    )
+
+    # The final guess and label are deliberately completed in Milestone 5.
     guess = "pending"
-    confidence = 0.0
-    label = "Second signal has not been added yet."
+    label = "Final reader-facing label will be added in Milestone 5."
+
+    # For this project, the combined 0–1 score is returned as confidence.
+    confidence = combined_score
+
+    # ── Audit log ─────────────────────────────────────────────────────
 
     audit.log_decision(
         content_id=content_id,
         creator_id=creator_id,
         guess=guess,
         model_score=model_score,
-        style_score=None,
-        combined_score=None,
+        style_score=style_score,
+        combined_score=combined_score,
         label=label,
         status="decided",
     )
+
+    # ── Response ──────────────────────────────────────────────────────
 
     return jsonify({
         "content_id": content_id,
@@ -222,7 +251,7 @@ def submit():
         "confidence": confidence,
         "label": label,
         "model_score": model_score,
-        "style_score": None,
+        "style_score": style_score,
     })
 
 
