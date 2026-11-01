@@ -329,3 +329,14 @@ that produced it:
 ---
 
 📖 **How to run this project: [RUNNING.md](RUNNING.md)**
+
+---
+
+## Unit 7 Stretch Features — Declared Before Building
+
+I plan to attempt all three Unit 7 stretch features:
+
+1. **Third signal:** add a third signal that measures a different property from the model and stylometry signals, and document how all three signals are weighted.
+2. **GET /content/<id>:** add an endpoint that returns a submitted item's current status and relevant decision information.
+3. **Verified-human path:** add an extra verification step through which a creator can earn a verified-human credential, and show that credential on their submitted content.
+
