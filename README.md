@@ -156,10 +156,6 @@ I do not want an uncertain score to sound like an accusation. The label clearly 
 
 ---
 
-## Sample Run
-
-The real submission, appeal, and log output will be pasted here after the endpoints are implemented and tested. I am leaving the outputs blank for now rather than inventing results that have not happened.
-
 **A submission**
 
 ## Sample Run
@@ -267,7 +263,7 @@ A later submission from the same creator also returned the `verified-human` cred
 
 ## Unit 7 Stretch Features — Declared Before Building
 
-I plan to attempt all three Unit 7 stretch features:
+I declared all three Unit 7 stretch features before building them, and all three are now implemented:
 
 1. **Third signal:** add a third signal that measures a different property from the model and stylometry signals, and document how all three signals are weighted.
 2. **GET /content/<id>:** add an endpoint that returns a submitted item's current status and relevant decision information.
