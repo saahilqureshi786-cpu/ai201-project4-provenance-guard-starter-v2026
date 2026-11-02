@@ -139,10 +139,9 @@ These values are defined in `config.py`.
 
 **Where it lives:** `scoring.py::combine_signals`
 
-**A case where my two signals split, and what my rule does with it:**  
-To be completed after I build the style signal and run both signals over the same calibration examples. I will use a real observed disagreement rather than inventing one before the second signal exists.
+**A case where my signals split, and what my rule does with it:**
 
----
+In one scoring test, model=0.90, style=0.10, and repetition=0.00 produced a combined score of 0.44. That falls in the unsure range. This shows that one strongly AI-like signal does not automatically create a high-confidence accusation when the other signals disagree.
 
 ## Label Variants
 
@@ -163,39 +162,92 @@ The real submission, appeal, and log output will be pasted here after the endpoi
 
 **A submission**
 
+## Sample Run
+
+### Submission
+
 ```bash
-$ curl -X POST http://127.0.0.1:5000/submit \
+curl -X POST http://127.0.0.1:5000/submit \
   -H "Content-Type: application/json" \
-  -d '{"text": "...", "creator_id": "..."}'
+  -d '{"text":"The system provides clear results. The system provides useful results. The system provides reliable results. The system provides consistent results. The system provides accurate results.","creator_id":"third-signal-test"}'
 ```
 
 ```json
-
+{
+  "confidence": 0.9424,
+  "content_id": "c93ed807-fa03-46ff-9e35-b25d45958ac1",
+  "guess": "ai",
+  "label": "Our signals strongly suggest this writing may be AI-generated. This result is not proof of authorship, and the writer can appeal the decision.",
+  "model_score": 0.9072,
+  "repetition_score": 0.94,
+  "style_score": 0.9891
+}
 ```
 
-**An appeal**
+### Appeal
 
 ```bash
-$ curl -X POST http://127.0.0.1:5000/appeal \
+curl -X POST http://127.0.0.1:5000/appeal \
   -H "Content-Type: application/json" \
-  -d '{"content_id": "...", "reasoning": "..."}'
+  -d '{"content_id":"88325713-3ae2-4231-b47e-cb8a9127a3b4","reasoning":"I wrote this myself and believe the system made the wrong decision."}'
 ```
+
+The appeal changed the status to:
 
 ```json
-
+{
+  "content_id": "88325713-3ae2-4231-b47e-cb8a9127a3b4",
+  "status": "under_review",
+  "message": "Your appeal was recorded and the item is now under review."
+}
 ```
 
-**What the log shows afterwards**
+The audit log also records:
+
+```json
+{
+  "content_id": "88325713-3ae2-4231-b47e-cb8a9127a3b4",
+  "creator_id": "label-human",
+  "event": "appeal",
+  "status": "under_review",
+  "reasoning": "I wrote this myself and believe the system made the wrong decision."
+}
+```
+
+### Stretch — GET /content
 
 ```bash
-$ curl "http://127.0.0.1:5000/log?limit=3"
+curl "http://127.0.0.1:5000/content/2ec48116-d6f9-4273-8058-97342b27014f"
 ```
 
 ```json
-
+{
+  "confidence": 0.3648,
+  "content_id": "2ec48116-d6f9-4273-8058-97342b27014f",
+  "creator_credential": "verified-human",
+  "creator_id": "verified-test-user",
+  "guess": "unsure",
+  "model_score": 0.4338,
+  "repetition_score": 0.0,
+  "status": "decided",
+  "style_score": 0.4845,
+  "verified_human": true
+}
 ```
 
----
+### Stretch — verified-human path
+
+`POST /verify-human` returned:
+
+```json
+{
+  "creator_id": "verified-test-user",
+  "creator_credential": "verified-human",
+  "verified_human": true
+}
+```
+
+A later submission from the same creator also returned the `verified-human` credential, and the verification event is stored in `logs/audit.jsonl`.
 
 ## How I Used AI
 
