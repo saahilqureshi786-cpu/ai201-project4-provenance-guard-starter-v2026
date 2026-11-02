@@ -8,6 +8,7 @@ Unit 7:
 - combined confidence
 - three reader-facing labels
 - POST /appeal
+- GET /content/<id>
 - audit logging
 """
 
@@ -93,12 +94,10 @@ def ping():
 def health():
     import detector
 
-    loaded = detector._model is not None
-
     return jsonify({
         "ok": True,
         "detector_model": config.DETECTOR_MODEL,
-        "detector_loaded": loaded,
+        "detector_loaded": detector._model is not None,
         "rate_limiting": config.RATE_LIMITING_ENABLED,
         "log_entries": len(audit.read_entries()),
     })
@@ -107,22 +106,10 @@ def health():
 # ── Submission route ──────────────────────────────────────────────────────
 
 @app.post("/submit")
-# @limiter.limit(
-#     f"{config.RATE_LIMIT_PER_MINUTE}/minute;"
-#     f"{config.RATE_LIMIT_PER_DAY}/day"
-# )
 def submit():
     """
-    Accept text and creator_id.
-
-    The route:
-    1. validates the request
-    2. runs the GPT-2 model signal
-    3. runs the stylometry signal
-    4. runs the repetition signal
-    5. combines all three scores
-    6. maps the result to a label
-    7. logs everything
+    Validate a submission, run three signals, combine them,
+    label the result, write the audit log, and return JSON.
     """
 
     import detector
@@ -146,7 +133,6 @@ def submit():
     text = payload.get("text")
     creator_id = payload.get("creator_id")
 
-    # Validate text.
     if not isinstance(text, str) or not text.strip():
         audit.log_rejection(
             creator_id=(
@@ -162,7 +148,6 @@ def submit():
             "message": "text must be a non-empty string.",
         }), 400
 
-    # Validate creator ID.
     if not isinstance(creator_id, str) or not creator_id.strip():
         audit.log_rejection(
             creator_id="unknown",
@@ -177,7 +162,6 @@ def submit():
     text = text.strip()
     creator_id = creator_id.strip()
 
-    # Reject extremely large submissions.
     if len(text) > 20000:
         audit.log_rejection(
             creator_id=creator_id,
@@ -192,8 +176,7 @@ def submit():
 
     content_id = str(uuid.uuid4())
 
-    # ── Signal one: GPT-2 predictability ──────────────────────────────
-
+    # Signal 1 — GPT-2 predictability
     try:
         model_score = detector.model_signal(text)
 
@@ -214,81 +197,20 @@ def submit():
             "message": str(exc),
         }), 503
 
-    # ── Signal two: stylometry ────────────────────────────────────────
-
+    # Signal 2 — stylometry
     style_score = stylometry.style_signal(text)
 
-    # ── Signal three: phrase repetition ───────────────────────────────
-
+    # Signal 3 — phrase repetition
     repetition_score = repetition_signal.repetition_signal(text)
 
-    # ── Combined confidence ───────────────────────────────────────────
-
+    # Combined score
     combined_score = scoring.combine_signals(
         model_score,
         style_score,
         repetition_score,
     )
 
-    confidence = combined_score
-
-    # ── Reader-facing result ──────────────────────────────────────────
-
     guess, label = scoring.score_to_label(combined_score)
-# ── Content status lookup — Unit 7 stretch ───────────────────────────────
-
-@app.get("/content/<content_id>")
-def get_content(content_id):
-    """
-    Return the current status and decision information for one submitted item.
-    """
-
-    entries = audit.entries_for(content_id)
-
-    if not entries:
-        return jsonify({
-            "error": "content_not_found",
-            "message": "No submitted content exists with that content_id.",
-        }), 404
-
-    original_decision = next(
-        (
-            entry
-            for entry in entries
-            if entry.get("guess") is not None
-        ),
-        None,
-    )
-
-    if original_decision is None:
-        return jsonify({
-            "error": "decision_not_found",
-            "message": "No original decision exists for this content.",
-        }), 404
-
-    latest_entry = entries[-1]
-
-    response = {
-        "content_id": content_id,
-        "creator_id": original_decision.get("creator_id"),
-        "guess": original_decision.get("guess"),
-        "confidence": original_decision.get("combined_score"),
-        "label": original_decision.get("label"),
-        "model_score": original_decision.get("model_score"),
-        "style_score": original_decision.get("style_score"),
-        "repetition_score": original_decision.get("repetition_score"),
-        "status": latest_entry.get(
-            "status",
-            original_decision.get("status", "decided"),
-        ),
-    }
-
-    if latest_entry.get("event") == "appeal":
-        response["appeal_reasoning"] = latest_entry.get("reasoning")
-
-    return jsonify(response)
-
-    # ── Audit log ─────────────────────────────────────────────────────
 
     audit.log_decision(
         content_id=content_id,
@@ -302,12 +224,10 @@ def get_content(content_id):
         repetition_score=repetition_score,
     )
 
-    # ── Response ──────────────────────────────────────────────────────
-
     return jsonify({
         "content_id": content_id,
         "guess": guess,
-        "confidence": confidence,
+        "confidence": combined_score,
         "label": label,
         "model_score": model_score,
         "style_score": style_score,
@@ -319,9 +239,7 @@ def get_content(content_id):
 
 @app.post("/appeal")
 def appeal():
-    """
-    Allow a writer to challenge a decision.
-    """
+    """Allow a writer to challenge a decision."""
 
     payload = request.get_json(silent=True)
 
@@ -372,10 +290,7 @@ def appeal():
             "message": "The content exists but no original decision was found.",
         }), 404
 
-    creator_id = original_decision.get(
-        "creator_id",
-        "unknown",
-    )
+    creator_id = original_decision.get("creator_id", "unknown")
 
     appeal_entry = audit.log_appeal(
         content_id=content_id,
@@ -386,11 +301,61 @@ def appeal():
     return jsonify({
         "content_id": content_id,
         "status": "under_review",
-        "message": (
-            "Your appeal was recorded and the item is now under review."
-        ),
+        "message": "Your appeal was recorded and the item is now under review.",
         "appeal": appeal_entry,
     })
+
+
+# ── Content status lookup — Unit 7 stretch ────────────────────────────────
+
+@app.get("/content/<content_id>")
+def get_content(content_id):
+    """Return the current status and decision information for one item."""
+
+    entries = audit.entries_for(content_id)
+
+    if not entries:
+        return jsonify({
+            "error": "content_not_found",
+            "message": "No submitted content exists with that content_id.",
+        }), 404
+
+    original_decision = next(
+        (
+            entry
+            for entry in entries
+            if entry.get("guess") is not None
+        ),
+        None,
+    )
+
+    if original_decision is None:
+        return jsonify({
+            "error": "decision_not_found",
+            "message": "No original decision exists for this content.",
+        }), 404
+
+    latest_entry = entries[-1]
+
+    response = {
+        "content_id": content_id,
+        "creator_id": original_decision.get("creator_id"),
+        "guess": original_decision.get("guess"),
+        "confidence": original_decision.get("combined_score"),
+        "label": original_decision.get("label"),
+        "model_score": original_decision.get("model_score"),
+        "style_score": original_decision.get("style_score"),
+        "repetition_score": original_decision.get("repetition_score"),
+        "status": latest_entry.get(
+            "status",
+            original_decision.get("status", "decided"),
+        ),
+    }
+
+    if latest_entry.get("event") == "appeal":
+        response["appeal_reasoning"] = latest_entry.get("reasoning")
+
+    return jsonify(response)
 
 
 # ── Audit log ─────────────────────────────────────────────────────────────
