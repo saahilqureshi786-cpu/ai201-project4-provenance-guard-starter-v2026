@@ -235,6 +235,58 @@ def submit():
     # ── Reader-facing result ──────────────────────────────────────────
 
     guess, label = scoring.score_to_label(combined_score)
+# ── Content status lookup — Unit 7 stretch ───────────────────────────────
+
+@app.get("/content/<content_id>")
+def get_content(content_id):
+    """
+    Return the current status and decision information for one submitted item.
+    """
+
+    entries = audit.entries_for(content_id)
+
+    if not entries:
+        return jsonify({
+            "error": "content_not_found",
+            "message": "No submitted content exists with that content_id.",
+        }), 404
+
+    original_decision = next(
+        (
+            entry
+            for entry in entries
+            if entry.get("guess") is not None
+        ),
+        None,
+    )
+
+    if original_decision is None:
+        return jsonify({
+            "error": "decision_not_found",
+            "message": "No original decision exists for this content.",
+        }), 404
+
+    latest_entry = entries[-1]
+
+    response = {
+        "content_id": content_id,
+        "creator_id": original_decision.get("creator_id"),
+        "guess": original_decision.get("guess"),
+        "confidence": original_decision.get("combined_score"),
+        "label": original_decision.get("label"),
+        "model_score": original_decision.get("model_score"),
+        "style_score": original_decision.get("style_score"),
+        "repetition_score": original_decision.get("repetition_score"),
+        "status": latest_entry.get(
+            "status",
+            original_decision.get("status", "decided"),
+        ),
+    }
+
+    if latest_entry.get("event") == "appeal":
+        response["appeal_reasoning"] = latest_entry.get("reasoning")
+
+    return jsonify(response)
 
     # ── Audit log ─────────────────────────────────────────────────────
 
