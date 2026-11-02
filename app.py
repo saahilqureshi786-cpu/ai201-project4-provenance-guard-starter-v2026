@@ -2,9 +2,9 @@
 """
 Provenance Guard — the web service.
 
-Unit 7 complete required backend:
+Unit 7:
 - POST /submit
-- two signals
+- three signals
 - combined confidence
 - three reader-facing labels
 - POST /appeal
@@ -113,17 +113,25 @@ def health():
 # )
 def submit():
     """
-    Accept text and creator_id, run both signals, combine them,
-    map the score to a label, log the result, and return JSON.
+    Accept text and creator_id.
+
+    The route:
+    1. validates the request
+    2. runs the GPT-2 model signal
+    3. runs the stylometry signal
+    4. runs the repetition signal
+    5. combines all three scores
+    6. maps the result to a label
+    7. logs everything
     """
 
     import detector
+    import repetition_signal
     import scoring
     import stylometry
 
     payload = request.get_json(silent=True)
 
-    # Request body must be a JSON object.
     if not isinstance(payload, dict):
         audit.log_rejection(
             creator_id="unknown",
@@ -184,7 +192,7 @@ def submit():
 
     content_id = str(uuid.uuid4())
 
-    # ── Signal one ────────────────────────────────────────────────────
+    # ── Signal one: GPT-2 predictability ──────────────────────────────
 
     try:
         model_score = detector.model_signal(text)
@@ -206,15 +214,20 @@ def submit():
             "message": str(exc),
         }), 503
 
-    # ── Signal two ────────────────────────────────────────────────────
+    # ── Signal two: stylometry ────────────────────────────────────────
 
     style_score = stylometry.style_signal(text)
+
+    # ── Signal three: phrase repetition ───────────────────────────────
+
+    repetition_score = repetition_signal.repetition_signal(text)
 
     # ── Combined confidence ───────────────────────────────────────────
 
     combined_score = scoring.combine_signals(
         model_score,
         style_score,
+        repetition_score,
     )
 
     confidence = combined_score
@@ -234,7 +247,10 @@ def submit():
         combined_score=combined_score,
         label=label,
         status="decided",
+        repetition_score=repetition_score,
     )
+
+    # ── Response ──────────────────────────────────────────────────────
 
     return jsonify({
         "content_id": content_id,
@@ -243,6 +259,7 @@ def submit():
         "label": label,
         "model_score": model_score,
         "style_score": style_score,
+        "repetition_score": repetition_score,
     })
 
 
@@ -252,15 +269,6 @@ def submit():
 def appeal():
     """
     Allow a writer to challenge a decision.
-
-    Input:
-        content_id
-        reasoning
-
-    A valid appeal:
-    - confirms the content exists
-    - records the appeal
-    - changes the current status to under_review
     """
 
     payload = request.get_json(silent=True)
@@ -297,7 +305,6 @@ def appeal():
             "message": "No submitted content exists with that content_id.",
         }), 404
 
-    # Find the original decision so we know which creator owns the item.
     original_decision = next(
         (
             entry
@@ -313,7 +320,10 @@ def appeal():
             "message": "The content exists but no original decision was found.",
         }), 404
 
-    creator_id = original_decision.get("creator_id", "unknown")
+    creator_id = original_decision.get(
+        "creator_id",
+        "unknown",
+    )
 
     appeal_entry = audit.log_appeal(
         content_id=content_id,
@@ -324,7 +334,9 @@ def appeal():
     return jsonify({
         "content_id": content_id,
         "status": "under_review",
-        "message": "Your appeal was recorded and the item is now under review.",
+        "message": (
+            "Your appeal was recorded and the item is now under review."
+        ),
         "appeal": appeal_entry,
     })
 
@@ -343,7 +355,10 @@ def get_log():
 
 
 def main():
-    print(f"Provenance Guard on http://{config.HOST}:{config.PORT}")
+    print(
+        f"Provenance Guard on "
+        f"http://{config.HOST}:{config.PORT}"
+    )
     print(f"  detector model:  {config.DETECTOR_MODEL}")
     print(
         f"  rate limiting:   "
