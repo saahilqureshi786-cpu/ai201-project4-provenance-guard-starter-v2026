@@ -125,8 +125,9 @@ The style signal cannot understand what the text means or determine who actually
 The initial two-signal version will use a weighted average. Both signals point in the same direction, where a larger score means more likely AI-generated. The model signal and style signal will initially receive equal weight. When the signals strongly disagree, their average should move the combined result toward the unsure range instead of allowing one signal alone to make a high-confidence accusation.
 
 **The numbers:**  
-Model signal weight = `0.50`  
-Style signal weight = `0.50`
+Model signal weight = `0.45`
+Style signal weight = `0.35`
+Repetition signal weight = `0.20`
 
 Initial thresholds:
 
