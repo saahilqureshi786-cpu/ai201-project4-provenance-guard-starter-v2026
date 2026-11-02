@@ -9,6 +9,7 @@ Unit 7:
 - three reader-facing labels
 - POST /appeal
 - GET /content/<id>
+- POST /verify-human
 - audit logging
 """
 
@@ -20,6 +21,10 @@ import audit
 import config
 
 app = Flask(__name__)
+
+VERIFICATION_STATEMENT = (
+    "I confirm that I am the author submitting my own work."
+)
 
 
 # ── Rate limiting — UNIT 8 ────────────────────────────────────────────────
@@ -57,25 +62,6 @@ if config.RATE_LIMITING_ENABLED:
         default_limits=[],
     )
 
-    @app.errorhandler(429)
-    def rate_limited(exc):
-        payload = request.get_json(silent=True)
-
-        if not isinstance(payload, dict):
-            payload = {}
-
-        audit.log_rejection(
-            creator_id=payload.get("creator_id", "unknown"),
-            reason="rate_limited",
-            limit=str(exc.description),
-        )
-
-        return jsonify({
-            "error": "rate_limited",
-            "message": "Too many submissions. Try again shortly.",
-            "limit": str(exc.description),
-        }), 429
-
 
 # ── Starter routes ────────────────────────────────────────────────────────
 
@@ -103,14 +89,75 @@ def health():
     })
 
 
+# ── Verified-human path — Unit 7 stretch ─────────────────────────────────
+
+@app.post("/verify-human")
+def verify_human():
+    """
+    Give a creator the demo verified-human credential after
+    completing an explicit confirmation step.
+
+    This demonstrates a provenance path. It is not real identity proof.
+    """
+
+    payload = request.get_json(silent=True)
+
+    if not isinstance(payload, dict):
+        return jsonify({
+            "error": "invalid_json",
+            "message": "Request body must be a JSON object.",
+        }), 400
+
+    creator_id = payload.get("creator_id")
+    statement = payload.get("statement")
+
+    if not isinstance(creator_id, str) or not creator_id.strip():
+        return jsonify({
+            "error": "invalid_creator_id",
+            "message": "creator_id must be a non-empty string.",
+        }), 400
+
+    if not isinstance(statement, str):
+        return jsonify({
+            "error": "invalid_statement",
+            "message": "A verification statement is required.",
+        }), 400
+
+    creator_id = creator_id.strip()
+    statement = statement.strip()
+
+    if statement != VERIFICATION_STATEMENT:
+        return jsonify({
+            "error": "verification_failed",
+            "message": (
+                "The verification statement did not match the "
+                "required confirmation."
+            ),
+            "required_statement": VERIFICATION_STATEMENT,
+        }), 400
+
+    verification = audit.log_verification(
+        creator_id=creator_id,
+        method="creator_confirmation",
+    )
+
+    return jsonify({
+        "creator_id": creator_id,
+        "verified_human": True,
+        "creator_credential": "verified-human",
+        "message": (
+            "Verification step completed. Future submissions from "
+            "this creator will display the verified-human credential."
+        ),
+        "verification": verification,
+    })
+
+
 # ── Submission route ──────────────────────────────────────────────────────
 
 @app.post("/submit")
 def submit():
-    """
-    Validate a submission, run three signals, combine them,
-    label the result, write the audit log, and return JSON.
-    """
+    """Run the three provenance signals and return a decision."""
 
     import detector
     import repetition_signal
@@ -203,7 +250,6 @@ def submit():
     # Signal 3 — phrase repetition
     repetition_score = repetition_signal.repetition_signal(text)
 
-    # Combined score
     combined_score = scoring.combine_signals(
         model_score,
         style_score,
@@ -211,6 +257,9 @@ def submit():
     )
 
     guess, label = scoring.score_to_label(combined_score)
+
+    creator_credential = audit.creator_credential(creator_id)
+    verified_human = creator_credential == "verified-human"
 
     audit.log_decision(
         content_id=content_id,
@@ -222,6 +271,8 @@ def submit():
         label=label,
         status="decided",
         repetition_score=repetition_score,
+        verified_human=verified_human,
+        creator_credential=creator_credential,
     )
 
     return jsonify({
@@ -232,6 +283,8 @@ def submit():
         "model_score": model_score,
         "style_score": style_score,
         "repetition_score": repetition_score,
+        "verified_human": verified_human,
+        "creator_credential": creator_credential,
     })
 
 
@@ -287,7 +340,7 @@ def appeal():
     if original_decision is None:
         return jsonify({
             "error": "decision_not_found",
-            "message": "The content exists but no original decision was found.",
+            "message": "No original decision was found.",
         }), 404
 
     creator_id = original_decision.get("creator_id", "unknown")
@@ -301,16 +354,18 @@ def appeal():
     return jsonify({
         "content_id": content_id,
         "status": "under_review",
-        "message": "Your appeal was recorded and the item is now under review.",
+        "message": (
+            "Your appeal was recorded and the item is now under review."
+        ),
         "appeal": appeal_entry,
     })
 
 
-# ── Content status lookup — Unit 7 stretch ────────────────────────────────
+# ── Content lookup — Unit 7 stretch ───────────────────────────────────────
 
 @app.get("/content/<content_id>")
 def get_content(content_id):
-    """Return the current status and decision information for one item."""
+    """Return the current status and provenance information."""
 
     entries = audit.entries_for(content_id)
 
@@ -336,10 +391,13 @@ def get_content(content_id):
         }), 404
 
     latest_entry = entries[-1]
+    creator_id = original_decision.get("creator_id")
+
+    current_credential = audit.creator_credential(creator_id)
 
     response = {
         "content_id": content_id,
-        "creator_id": original_decision.get("creator_id"),
+        "creator_id": creator_id,
         "guess": original_decision.get("guess"),
         "confidence": original_decision.get("combined_score"),
         "label": original_decision.get("label"),
@@ -350,6 +408,8 @@ def get_content(content_id):
             "status",
             original_decision.get("status", "decided"),
         ),
+        "verified_human": current_credential == "verified-human",
+        "creator_credential": current_credential,
     }
 
     if latest_entry.get("event") == "appeal":
