@@ -286,50 +286,265 @@ I plan to attempt all three Unit 8 stretch features before implementing them:
 
 ## Rate Limiting
 
-**My limits:** ___ per minute, ___ per day
+**My limits:** 10 submissions per minute and 200 submissions per day.
 
 **Why those numbers and not others:**
-<!-- Think about two people: a real writer submitting their own work a few
-     times an hour, and a script sending a thousand variations to map your
-     thresholds. Your numbers have to be liveable for the first and hostile to
-     the second. -->
 
-**What a caller counts as:** <!-- per address, or per creator_id? They fail
-differently — one script can look like a thousand callers, and one household
-can look like one. -->
+A real writer should normally not need to submit more than 10 pieces of writing in one minute. A script attempting to map the detector's thresholds or repeatedly probe the service can send requests much faster than that.
+
+The daily limit of 200 leaves substantial room for legitimate repeated use while putting a ceiling on sustained automated probing.
+
+The limiter is keyed primarily by `creator_id` when a usable creator ID is present. Requests without a usable creator ID fall back to the caller's network address.
+
+**What a caller counts as:**
+
+For normal `/submit` requests, a caller is identified by `creator_id`. This catches a single creator rapidly sending repeated variations even when the service is accessed from a shared network.
+
+The trade-off is that a malicious caller can rotate creator IDs, so this does not provide complete identity or abuse prevention.
 
 **The run of status codes when I pushed past it:**
 
-<!-- python run_attacks.py --flood 15 -->
+Produced by `run_attacks.py::run_flood` using 15 submissions from `flood_tester`:
 
+```text
+200 200 200 200 200 200 200 200 200 200 429 429 429 429 429
 ```
 
-```
+The first 10 requests were accepted and the final 5 were rejected with HTTP 429.
+
+The rejected requests were also recorded in `logs/audit.jsonl` with `event: rejected`, `reason: rate_limited`, and `status: rejected`.
 
 ---
-
 ## Attack Run — Before
 
-<!-- Every attack with its outcome and a held-or-broke mark.
-     `run_attacks.py --label before` produces the table. -->
+The complete staff attack set was run before changing the detector, signal weights, thresholds, or labels.
+
+**Result:** 56 attacks total — **41 HELD, 15 BROKE**.
+
+The table below is the real output from `run_attacks.py::main`, with each previously blank verdict manually judged from the attack target and service response.
+
+| ID | Family | Targeting | Status | Content ID | Guess | Score | Verdict |
+|---|---|---|---|---|---|---|---|
+| EV01 | evasion | signal two: typos raise word variety | 200 | `2af41cfe-b49c-4dd4-81c9-0461319cbe60` | human | 0.248 | BROKE |
+| EV02 | evasion | signal two: broken-up sentences raise length spread | 200 | `97365eaf-5133-4947-99e6-69c245974273` | unsure | 0.353 | BROKE |
+| EV03 | evasion | signal two: a pasted quotation changes the shape | 200 | `e6cc5682-1a47-48b8-8532-f6b2c9a3cfe7` | unsure | 0.447 | BROKE |
+| EV04 | evasion | signal one: unusual words raise perplexity | 200 | `ff164fde-8b08-432c-a373-d2ab35b6139d` | unsure | 0.449 | BROKE |
+| EV05 | evasion | both signals: heavy human editing pass | 200 | `078f210d-e62b-4195-8130-dbff676a7b64` | human | 0.260 | BROKE |
+| EV06 | evasion | signal two: one very long sentence and one very short | 200 | `0aa3357b-6bcf-4224-a395-389905cf37a4` | unsure | 0.376 | BROKE |
+| EV07 | evasion | signal two: padding with punctuation | 200 | `15e28daa-88be-464b-a98a-a9b056f5f9be` | unsure | 0.499 | BROKE |
+| EV08 | evasion | signal one: text below the token window | 200 | `1746468b-4ea1-4599-acf1-a39e18c6a62d` | human | 0.263 | BROKE |
+| EV09 | evasion | both: AI text with a human opening paragraph bolted on | 200 | `081d4fe8-3e07-4c87-ad98-ca25bbbde341` | unsure | 0.455 | BROKE |
+| EV10 | evasion | signal two: repeated stanza structure | 200 | `fab9a640-7db0-4346-874e-f42c7a634a6e` | ai | 0.859 | HELD |
+| FP01 | false_positive | plain, clear human writing with no flourishes | 200 | `75626dfd-a203-43d4-a158-a9b3d68af68e` | unsure | 0.448 | HELD |
+| FP02 | false_positive | human writing in a formal register | 200 | `93fcef5b-b4a7-4543-a177-7ab8a8f6a242` | unsure | 0.552 | HELD |
+| FP03 | false_positive | a non-native English speaker writing carefully | 200 | `345d9eb1-8903-4b81-88a7-0f5de757e6d8` | unsure | 0.547 | HELD |
+| FP04 | false_positive | a student essay written to a rubric | 200 | `18d5d2e6-066a-4284-b941-446bedf3d998` | unsure | 0.535 | HELD |
+| FP05 | false_positive | technical documentation written by a person | 200 | `3eadea7b-56cd-4210-bff4-d98feea47908` | unsure | 0.616 | HELD |
+| FP06 | false_positive | a person imitating a formal template | 200 | `3f6712c2-6537-463d-8732-b7e572b554d8` | unsure | 0.560 | HELD |
+| FP07 | false_positive | human writing that repeats a phrase deliberately | 200 | `71960bbf-87e6-4f09-8991-96743a1849c0` | ai | 0.661 | BROKE |
+| FP08 | false_positive | very short genuine human submission | 200 | `925e4b9f-29d1-4017-b533-66244b6cc4d8` | human | 0.209 | HELD |
+| PI01 | prompt_injection | instruction to ignore the check | 200 | `70df89b4-db19-4603-9cd8-21bd1909c243` | human | 0.285 | HELD |
+| PI02 | prompt_injection | instruction disguised as a system message | 200 | `712d2d2c-e847-4b85-ab70-04ca06776eac` | human | 0.186 | HELD |
+| PI03 | prompt_injection | instruction wrapped in the writer's voice | 200 | `01d96ec1-6213-4e58-998d-1194deae5047` | unsure | 0.406 | HELD |
+| PI04 | prompt_injection | attempt to make the label text hostile | 200 | `bd295567-c139-4cb0-b9bb-c59cc37ce78c` | unsure | 0.362 | HELD |
+| PI05 | prompt_injection | attempt to inject into the audit log | 200 | `6590c291-4a2e-4a02-a4a6-a3073e2a492f` | human | 0.345 | HELD |
+| PI06 | prompt_injection | instruction plus real human text | 200 | `4428f4a4-e9f1-46ef-a910-cb59c770d6b9` | unsure | 0.422 | HELD |
+| MF01 | malformed | text is only whitespace | 400 | `—` | — | — | HELD |
+| MF02 | malformed | text is a single character | 400 | `—` | — | — | HELD |
+| MF03 | malformed | text is control characters | 200 | `bef992e3-692a-45e0-8883-7ae363561982` | human | 0.168 | BROKE |
+| MF04 | malformed | text is only punctuation | 200 | `6bb71c3b-69bb-449b-b5eb-0a36962741fc` | human | 0.285 | BROKE |
+| MF05 | malformed | text is a very long single word | 200 | `abe0ea55-c8b5-494e-94c1-9ffb86a6b71f` | unsure | 0.617 | BROKE |
+| MF06 | malformed | text is emoji only | 200 | `3efc0aff-3399-4c0b-99df-f31debbbe00d` | ai | 0.757 | BROKE |
+| MF07 | malformed | text is right-to-left script | 200 | `3d8c64e3-1c5c-4754-b6e1-ba2839d69289` | ai | 0.732 | BROKE |
+| MF08 | malformed | text is 60,000 characters | 413 | `—` | — | — | HELD |
+| RQ01 | malformed | no text field at all | 400 | `—` | — | — | HELD |
+| RQ02 | malformed | no creator_id | 400 | `—` | — | — | HELD |
+| RQ03 | malformed | text is a number | 400 | `—` | — | — | HELD |
+| RQ04 | malformed | text is a list | 400 | `—` | — | — | HELD |
+| RQ05 | malformed | text is null | 400 | `—` | — | — | HELD |
+| RQ06 | malformed | creator_id is an object | 400 | `—` | — | — | HELD |
+| RQ07 | malformed | body is a JSON array, not an object | 400 | `—` | — | — | HELD |
+| RQ08 | malformed | body is unparseable JSON | 400 | `—` | — | — | HELD |
+| RQ09 | malformed | body is empty | 400 | `—` | — | — | HELD |
+| RQ10 | malformed | body is form-encoded, not JSON | 400 | `—` | — | — | HELD |
+| RQ11 | malformed | body is JSON claiming to be plain text | 400 | `—` | — | — | HELD |
+| RQ12 | malformed | deeply nested JSON | 400 | `—` | — | — | HELD |
+| FL01_01 | flood_same_creator | 20 rapid submissions from one creator | 200 | `c0cb8c65-877b-4274-bd39-54bf384ed7f3` | human | 0.211 | HELD |
+| FL01_02 | flood_same_creator | 20 rapid submissions from one creator | 200 | `ad860292-185c-4aa7-b939-319c828603e3` | human | 0.211 | HELD |
+| FL01_03 | flood_same_creator | 20 rapid submissions from one creator | 200 | `5949e8d4-fe15-403e-bfa9-850819c61e31` | human | 0.211 | HELD |
+| FL01_04 | flood_same_creator | 20 rapid submissions from one creator | 200 | `61a44c46-45cc-45fc-8f9f-285098fca003` | human | 0.211 | HELD |
+| FL01_05 | flood_same_creator | 20 rapid submissions from one creator | 200 | `795ea502-9359-43bc-a293-c671a2cff68c` | human | 0.211 | HELD |
+| FL01_06 | flood_same_creator | 20 rapid submissions from one creator | 200 | `ad34ab83-49af-4310-98c7-8ab3748c6205` | human | 0.211 | HELD |
+| FL01_07 | flood_same_creator | 20 rapid submissions from one creator | 200 | `bf9c355c-1012-4b8c-8be1-5d01010214a4` | human | 0.211 | HELD |
+| FL01_08 | flood_same_creator | 20 rapid submissions from one creator | 200 | `3890b487-9c15-44cc-8221-2ee52b23c649` | human | 0.211 | HELD |
+| FL01_09 | flood_same_creator | 20 rapid submissions from one creator | 200 | `fc4aa2ff-2697-49ea-8fb6-add1aa6dfd81` | human | 0.211 | HELD |
+| FL01_10 | flood_same_creator | 20 rapid submissions from one creator | 200 | `0b0c856d-eedc-495b-9423-b6057abd3c76` | human | 0.211 | HELD |
+| FL01_11 | flood_same_creator | 20 rapid submissions from one creator | 429 | `—` | — | — | HELD |
+| FL01_12 | flood_same_creator | 20 rapid submissions from one creator | 429 | `—` | — | — | HELD |
 
 
+### Ten audit log entries from the run
 
-**Ten audit log entries from the run**
-
-<!-- Choose entries that show the interesting failures, not the ten easiest. -->
+These entries include successful evasions, false-positive risk, malformed-input behavior, a successful AI detection, and a rate-limit rejection.
 
 ```json
-
+[
+  {
+    "combined_score": 0.2478,
+    "content_id": "2af41cfe-b49c-4dd4-81c9-0461319cbe60",
+    "creator_credential": null,
+    "creator_id": "attacker_EV01",
+    "guess": "human",
+    "label": "Our signals strongly suggest this writing was written by a person.",
+    "model_score": 0.1635,
+    "repetition_score": 0.0,
+    "status": "decided",
+    "style_score": 0.4978,
+    "timestamp": "2026-11-08T16:13:41+00:00",
+    "verified_human": false
+  },
+  {
+    "combined_score": 0.2604,
+    "content_id": "078f210d-e62b-4195-8130-dbff676a7b64",
+    "creator_credential": null,
+    "creator_id": "attacker_EV05",
+    "guess": "human",
+    "label": "Our signals strongly suggest this writing was written by a person.",
+    "model_score": 0.3212,
+    "repetition_score": 0.0,
+    "status": "decided",
+    "style_score": 0.3309,
+    "timestamp": "2026-11-08T16:13:41+00:00",
+    "verified_human": false
+  },
+  {
+    "combined_score": 0.8588,
+    "content_id": "fab9a640-7db0-4346-874e-f42c7a634a6e",
+    "creator_credential": null,
+    "creator_id": "attacker_EV10",
+    "guess": "ai",
+    "label": "Our signals strongly suggest this writing may be AI-generated. This result is not proof of authorship, and the writer can appeal the decision.",
+    "model_score": 0.9792,
+    "repetition_score": 0.85,
+    "status": "decided",
+    "style_score": 0.7091,
+    "timestamp": "2026-11-08T16:13:42+00:00",
+    "verified_human": false
+  },
+  {
+    "combined_score": 0.6155,
+    "content_id": "3eadea7b-56cd-4210-bff4-d98feea47908",
+    "creator_credential": null,
+    "creator_id": "attacker_FP05",
+    "guess": "unsure",
+    "label": "Our signals do not give a clear result, so we are not making an authorship claim about this writing.",
+    "model_score": 0.8005,
+    "repetition_score": 0.084,
+    "status": "decided",
+    "style_score": 0.6813,
+    "timestamp": "2026-11-08T16:13:42+00:00",
+    "verified_human": false
+  },
+  {
+    "combined_score": 0.6615,
+    "content_id": "71960bbf-87e6-4f09-8991-96743a1849c0",
+    "creator_credential": null,
+    "creator_id": "attacker_FP07",
+    "guess": "ai",
+    "label": "Our signals strongly suggest this writing may be AI-generated. This result is not proof of authorship, and the writer can appeal the decision.",
+    "model_score": 0.8816,
+    "repetition_score": 0.368,
+    "status": "decided",
+    "style_score": 0.5463,
+    "timestamp": "2026-11-08T16:13:42+00:00",
+    "verified_human": false
+  },
+  {
+    "combined_score": 0.3455,
+    "content_id": "6590c291-4a2e-4a02-a4a6-a3073e2a492f",
+    "creator_credential": null,
+    "creator_id": "attacker_PI05",
+    "guess": "human",
+    "label": "Our signals strongly suggest this writing was written by a person.",
+    "model_score": 0.6401,
+    "repetition_score": 0.0,
+    "status": "decided",
+    "style_score": 0.1643,
+    "timestamp": "2026-11-08T16:13:42+00:00",
+    "verified_human": false
+  },
+  {
+    "combined_score": 0.168,
+    "content_id": "bef992e3-692a-45e0-8883-7ae363561982",
+    "creator_credential": null,
+    "creator_id": "attacker_MF03",
+    "guess": "human",
+    "label": "Our signals strongly suggest this writing was written by a person.",
+    "model_score": 0.0,
+    "repetition_score": 0.0,
+    "status": "decided",
+    "style_score": 0.48,
+    "timestamp": "2026-11-08T16:13:42+00:00",
+    "verified_human": false
+  },
+  {
+    "combined_score": 0.7566,
+    "content_id": "3efc0aff-3399-4c0b-99df-f31debbbe00d",
+    "creator_credential": null,
+    "creator_id": "attacker_MF06",
+    "guess": "ai",
+    "label": "Our signals strongly suggest this writing may be AI-generated. This result is not proof of authorship, and the writer can appeal the decision.",
+    "model_score": 0.9969,
+    "repetition_score": 0.0,
+    "status": "decided",
+    "style_score": 0.88,
+    "timestamp": "2026-11-08T16:13:43+00:00",
+    "verified_human": false
+  },
+  {
+    "combined_score": 0.7316,
+    "content_id": "3d8c64e3-1c5c-4754-b6e1-ba2839d69289",
+    "creator_credential": null,
+    "creator_id": "attacker_MF07",
+    "guess": "ai",
+    "label": "Our signals strongly suggest this writing may be AI-generated. This result is not proof of authorship, and the writer can appeal the decision.",
+    "model_score": 0.9064,
+    "repetition_score": 0.0,
+    "status": "decided",
+    "style_score": 0.9248,
+    "timestamp": "2026-11-08T16:13:43+00:00",
+    "verified_human": false
+  },
+  {
+    "creator_id": "attacker_flood",
+    "event": "rejected",
+    "limit": "10 per 1 minute",
+    "reason": "rate_limited",
+    "status": "rejected",
+    "timestamp": "2026-11-08T16:13:43+00:00"
+  }
+]
 ```
 
-**The single worst outcome** — the one I'd least want to explain to a writer
-whose work got caught by it:
+### The single worst outcome
 
+The worst result was **FP07**, a false-positive attack consisting of genuine human writing that deliberately repeated a phrase.
 
+The service returned:
+
+```text
+guess: ai
+combined score: 0.6615
+model score: 0.8816
+style score: 0.5463
+repetition score: 0.3680
+```
+
+This is the outcome I would least want to explain to a real writer because the system crossed the high-confidence AI threshold and made an AI-facing authorship claim about writing that the attack set identifies as genuinely human.
+
+The other seven false-positive attacks did not receive an AI label; they were either `human` or `unsure`.
 
 ---
-
 ## Run Log and Verdicts
 
 <!-- Your five criteria across three trials. `run_eval.py --label before`. -->
