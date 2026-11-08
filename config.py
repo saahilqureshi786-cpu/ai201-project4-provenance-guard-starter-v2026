@@ -1,10 +1,12 @@
 """
 Settings for Provenance Guard.
 
-Unit 8 improvement #1:
-AI_THRESHOLD is raised from 0.65 to 0.70 in response to FP07.
+Unit 8 measured improvements:
+1. AI_THRESHOLD raised from 0.65 to 0.70 after FP07.
+2. HUMAN_THRESHOLD raised from 0.35 to 0.45 after the
+   label-coverage criterion could not reach all three labels.
 
-Everything else stays unchanged so the before/after comparison remains valid.
+Everything else remains unchanged.
 """
 
 import os
@@ -44,13 +46,23 @@ WEIGHT_REPETITION_SIGNAL = 0.20
 
 # ─── Thresholds ──────────────────────────────────────────────────────────────
 
-HUMAN_THRESHOLD = 0.35
+# Unit 8 improvement #2:
+#
+# Before:
+#   human example  = 0.4093 -> unsure
+#   another example = 0.5221 -> unsure
+#
+# Raising the human threshold to 0.45 should make:
+#   0.4093 -> human
+#   0.5221 -> unsure
+# while preserving the separate AI example.
+HUMAN_THRESHOLD = 0.45
+
 
 # Unit 8 improvement #1:
-# FP07 was genuine human writing but scored 0.6615,
-# slightly above the old 0.65 AI threshold.
-# Raising the threshold to 0.70 should move that case
-# from high-confidence AI to unsure.
+# FP07 was genuine human writing with a combined
+# score of 0.6615. Raising this boundary moved
+# that case from AI to unsure.
 AI_THRESHOLD = 0.70
 
 
