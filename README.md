@@ -547,43 +547,106 @@ The other seven false-positive attacks did not receive an AI label; they were ei
 ---
 ## Run Log and Verdicts
 
-<!-- Your five criteria across three trials. `run_eval.py --label before`. -->
+### Before improvement
 
-| Criterion | Target | Run 1 | Run 2 | Run 3 | Verdict |
+| Criterion | Target | Trial 1 | Trial 2 | Trial 3 | Verdict |
 |---|---|---|---|---|---|
-| 1. False positives | Maximum 1/10 clearly-human pieces labeled high-confidence AI |  |  |  |  |
-| 2. Score spread | At least 0.40 difference between clearly-AI and clearly-human scores |  |  |  |  |
-| 3. Label coverage | 3/3 labels reachable |  |  |  |  |
-| 4. Appeal path | 5/5 valid appeals change status and are logged |  |  |  |  |
-| 5. Bad input | At least 4/5 malformed inputs return controlled errors |  |  |  |  |
+| 1. False positives on my own writing | At most 1 of 10 labeled AI | 0/10 | 0/10 | 0/10 | **MET** |
+| 2. Clearly-human vs clearly-AI score spread | At least 0.40 | 0.7041 | 0.7041 | 0.7041 | **MET** |
+| 3. All three labels reachable | human, unsure, and AI all reachable | AI + unsure | AI + unsure | AI + unsure | **MISSED** |
+| 4. Appeals | 5 of 5 become under_review and are logged | 5/5 | 5/5 | 5/5 | **MET** |
+| 5. Malformed submissions | At least 4 of 5 controlled errors | 5/5 | 5/5 | 5/5 | **MET** |
 
-**Real output from one trial**, pasted as text, naming the file and function
-that produced it:
+The full real output is saved in `results/eval_run_2026-11-08_1037_before.md`.
 
-```json
+### Diagnosis — Criterion 3
 
+**Stage:** signal scoring, combining rule, and label mapping.
+
+The example intended to reach the human label received `model_score = 0.6472`, `style_score = 0.6595`, and `repetition_score = 0.0000`.
+
+Using the current weighting:
+
+```text
+0.45 * 0.6472 = 0.2912
+0.35 * 0.6595 = 0.2308
+0.20 * 0.0000 = 0.0000
+combined = 0.5221
 ```
 
-**Diagnoses**
+The human threshold is 0.35, so a combined score of 0.5221 lands in the `unsure` band. Both the GPT-2 predictability signal and the stylometry signal treated this human-style example as fairly AI-like. Their combined 80% weight overwhelmed the zero repetition score.
 
-<!-- For each miss AND each broken attack: the stage and the mechanism.
+Therefore the criterion missed because the human example could not cross the current human threshold, not because the human label was missing from the code.
 
-     Your service has five stages: the route, signal one, signal two, the
-     combining rule, and the label mapping.
+### Diagnoses for every broken attack
 
-     Not a diagnosis:  "The evasion attacks got through."
-     A diagnosis:      "Four evasion inputs got through. All four had typos
-                        added to AI-generated text. My second signal measures
-                        word variety, and typos raise word variety — so it read
-                        them as more human. My combining rule weights that
-                        signal at 0.6, so it dragged the whole score down."
+#### EV01 — BROKE
 
-     Look for a pattern. Five failures on one signal is one problem, not five. -->
+**Stage:** model signal and combining rule. Typos made the text less predictable to GPT-2, dropping the model score to 0.1635. The style score was only 0.4978 and repetition was 0, so the combined score fell to 0.2478 and the AI text was labeled human.
 
+#### EV02 — BROKE
 
+**Stage:** stylometry and combining rule. Breaking the text into uneven sentence lengths pushed the style score down to 0.2455. Even with model score 0.5943, the combined score was only 0.3534, so the attack escaped into the unsure band.
+
+#### EV03 — BROKE
+
+**Stage:** stylometry and combining rule. Adding a quotation changed the surface shape of the text, leaving style score 0.4214. Model score 0.6662 was not enough by itself, and repetition was 0, producing 0.4473 and an unsure label.
+
+#### EV04 — BROKE
+
+**Stage:** model predictability signal. Unusual vocabulary increased perplexity, so the model signal reached only 0.6114. With style at 0.4969 and no repetition evidence, the combined score was 0.4490 and the AI text remained unsure.
+
+#### EV05 — BROKE
+
+**Stage:** both primary signals and combining rule. A heavy human-style editing pass lowered model score to 0.3212 and style score to 0.3309, with repetition at 0. The combined score became 0.2604, causing AI-origin text to be labeled human.
+
+#### EV06 — BROKE
+
+**Stage:** stylometry. One very long sentence plus one very short sentence created large sentence-length variation, which the stylometry rule treats as human-like. Style fell to 0.2475; the final score was 0.3755, so the attack escaped into unsure.
+
+#### EV07 — BROKE
+
+**Stage:** combining rule. The punctuation-modified text produced model 0.5862 and style 0.6710, but repetition was 0. Because repetition carries 20% of the final rule, the combined score remained 0.4986 instead of crossing the 0.65 AI threshold.
+
+#### EV08 — BROKE
+
+**Stage:** model predictability signal. The short AI text produced a low model score of 0.2452. Style was only 0.4358 and repetition was 0, producing a combined score of 0.2629 and a human label.
+
+#### EV09 — BROKE
+
+**Stage:** stylometry and combining rule. Adding a human-style opening paragraph pulled the style score down to 0.3941. Although model score remained 0.7042, repetition was 0, so the final score was only 0.4548 and the attack escaped into unsure.
+
+#### FP07 — BROKE
+
+**Stage:** model signal, repetition signal, and AI threshold. This is genuine human writing that deliberately repeats a phrase, but it produced model score 0.8816, style 0.5463, and repetition 0.3680. The weighted score reached 0.6615, just above the 0.65 AI threshold, so the system falsely accused genuine human writing of being AI-generated.
+
+**This is the highest-priority failure because a false AI accusation is more harmful than returning `unsure` for AI-origin text.**
+
+#### MF03 — BROKE
+
+**Stage:** request validation. Control-character content was still a non-empty string, so the route allowed it through to the detector instead of rejecting it as unusable input. It was then classified human.
+
+#### MF04 — BROKE
+
+**Stage:** request validation. Punctuation-only content passed the current non-empty-string check. The detector then assigned it a normal authorship label rather than rejecting content with no usable words.
+
+#### MF05 — BROKE
+
+**Stage:** request validation. A very long single word is under the character limit and non-empty, so the route accepts it even though it is not normal prose. The service returned an authorship result instead of a controlled input error.
+
+#### MF06 — BROKE
+
+**Stage:** request validation plus detector assumptions. Emoji-only content passes the non-empty check. GPT-2 and the stylometry heuristic then score unsupported content as if it were English prose, producing a high-confidence AI label.
+
+#### MF07 — BROKE
+
+**Stage:** detector assumptions and validation. Right-to-left script was accepted even though the detector uses an English GPT-2 model and English-oriented stylometry. Those signals produced model 0.9064 and style 0.9248, causing a high-confidence AI label for text the detector is not well designed to evaluate.
+
+### Priority for the first improvement
+
+I will address FP07 first. Its score of 0.6615 is only slightly above the current 0.65 AI threshold. Raising the high-confidence AI threshold is a direct response to the false-positive mechanism and should move this genuine human example from `ai` to `unsure` without changing the signals themselves.
 
 ---
-
 ## The Improvement
 
 **What I changed:**
