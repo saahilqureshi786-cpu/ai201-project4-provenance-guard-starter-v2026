@@ -272,6 +272,17 @@ I declared all three Unit 7 stretch features before building them, and all three
 <!-- ═══════════════════════ UNIT 8 — THE TEST ═══════════════════════ -->
 
 ---
+## Unit 8 Stretch Features — Declared Before Building
+
+I plan to attempt all three Unit 8 stretch features before implementing them:
+
+1. **Three attacks on another system:** I will write three original attacks against another team's Provenance Guard system, run them without changing that system, and report the outcome of each attack. I will only claim this stretch feature if I actually have access to another team's running system.
+
+2. **Per-creator rate limiting:** I will key the `/submit` rate limit primarily to `creator_id` rather than only to the caller's network address. This should help catch repeated automated submissions from one creator identity, although a malicious caller could still rotate creator IDs.
+
+3. **Second measured improvement:** After the required before-run diagnosis and first measured improvement, I will make a second diagnosis-driven change and measure it with another full comparable run.
+
+---
 
 ## Rate Limiting
 
