@@ -946,3 +946,33 @@ I do not have documented results from another team's running system, so I am not
 ---
 
 📖 **How to run this project: [RUNNING.md](RUNNING.md)**
+---
+
+## Capstone
+
+**What This Extends**
+
+For Unit 9, I am extending my existing Provenance Guard system from Units 7 and 8.
+
+The existing system accepts writing through `POST /submit`, runs three authorship signals, returns a human/unsure/AI decision, supports appeals, records audit events, and rate-limits submissions.
+
+The new Unit 9 work adds an operational observability layer: structured run logging, request duration measurement, stage timing, and measured compute cost.
+
+**The Shape**
+
+I chose **Shape A — Deploy and instrument**.
+
+I am using **Path B — local with logs** because Provenance Guard loads GPT-2 locally.
+
+**Out of scope:** I am not replacing GPT-2, changing the three authorship signals, rebuilding the scoring system, creating a new interface, or starting a new project.
+
+**Unit 9 Stretch Features — Declared Before Building**
+
+1. **Second measured improvement (+2):** I will make a second diagnosis-driven change and produce a third comparable run log.
+
+2. **Latency breakdown (+1):** I will measure where request time is spent across the major submission stages.
+
+3. **Load observation (+1):** I will run the service at roughly ten times its normal request rate and report what changes.
+
+I am not attempting the both-run-paths stretch.
+
