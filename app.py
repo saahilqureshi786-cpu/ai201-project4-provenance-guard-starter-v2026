@@ -18,14 +18,51 @@ Unit 8:
 - rejected requests logged
 """
 
+import time
 import uuid
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, g
 
 import audit
 import config
+import operational_log
 
 app = Flask(__name__)
+
+# Unit 9 - Operational Logging
+
+@app.before_request
+def start_request_timer():
+    g.request_start_time = time.perf_counter()
+
+
+@app.after_request
+def record_operational_log(response):
+    start = getattr(g, "request_start_time", None)
+
+    duration_ms = (
+        (time.perf_counter() - start) * 1000
+        if start is not None
+        else 0
+    )
+
+    try:
+        payload = request.get_json(silent=True)
+        output = response.get_json(silent=True)
+
+        operational_log.log_run(
+            method=request.method,
+            path=request.path,
+            input_data=operational_log.summarize_input(payload),
+            output_data=operational_log.summarize_output(output),
+            status_code=response.status_code,
+            duration_ms=duration_ms,
+        )
+
+    except Exception:
+        app.logger.exception("Operational logging failed")
+
+    return response
 
 VERIFICATION_STATEMENT = (
     "I confirm that I am the author submitting my own work."
