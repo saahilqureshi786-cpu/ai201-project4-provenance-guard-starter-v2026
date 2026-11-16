@@ -57,6 +57,7 @@ def record_operational_log(response):
             output_data=operational_log.summarize_output(output),
             status_code=response.status_code,
             duration_ms=duration_ms,
+            stage_timings_ms=getattr(g, "stage_timings_ms", None),
         )
 
     except Exception:
@@ -322,7 +323,9 @@ def submit():
     # ── Signal 1: GPT-2 predictability ────────────────────────────────
 
     try:
+        t0 = time.perf_counter()
         model_score = detector.model_signal(text)
+        model_ms = (time.perf_counter() - t0) * 1000
 
     except ValueError as exc:
         audit.log_rejection(
@@ -348,14 +351,19 @@ def submit():
 
     # ── Signal 2: stylometry ──────────────────────────────────────────
 
+    t0 = time.perf_counter()
     style_score = stylometry.style_signal(text)
+    style_ms = (time.perf_counter() - t0) * 1000
 
     # ── Signal 3: repetition ──────────────────────────────────────────
 
+    t0 = time.perf_counter()
     repetition_score = repetition_signal.repetition_signal(text)
+    repetition_ms = (time.perf_counter() - t0) * 1000
 
     # ── Combine signals ───────────────────────────────────────────────
 
+    t0 = time.perf_counter()
     combined_score = scoring.combine_signals(
         model_score,
         style_score,
@@ -363,6 +371,13 @@ def submit():
     )
 
     guess, label = scoring.score_to_label(combined_score)
+    scoring_ms = (time.perf_counter() - t0) * 1000
+    g.stage_timings_ms = {
+        "model": model_ms,
+        "stylometry": style_ms,
+        "repetition": repetition_ms,
+        "scoring": scoring_ms,
+    }
 
     # ── Creator credential ────────────────────────────────────────────
 
